@@ -91,7 +91,7 @@
   {
     "type": "type",
     "selector": "input[name=\"sudoCommand\"]",
-    "value": "{{database_name}}",
+    "value": "sudo delete database {{database_name}}",
     "url_state": {
       "before": {
         "url_pattern": "^https://dashboard\\.render\\.com/d/[^/]+$"
@@ -103,7 +103,7 @@
   },
   {
     "type": "click",
-    "selector": "text=\"{{database_name}}\"",
+    "selector": "text=\"Delete Database\"",
     "url_state": {
       "before": {
         "url_pattern": "^https://dashboard\\.render\\.com/d/[^/]+$"

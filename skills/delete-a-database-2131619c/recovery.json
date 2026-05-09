@@ -204,26 +204,39 @@
     },
     {
       "step_id": 10,
-      "intent": "click_database_name",
+      "intent": "delete_database",
       "target": {
-        "text": "{{database_name}}",
+        "text": "Delete Database",
         "role": "button"
       },
       "anchors": [
         {
-          "text": "{{database_name}}",
+          "text": "delete database",
+          "priority": 2
+        },
+        {
+          "text": "delete database button",
+          "priority": 1
+        },
+        {
+          "text": "Delete Database",
           "priority": 2
         }
       ],
       "fallback": {
         "text_variants": [
-          "{{database_name}}"
+          "Delete Database",
+          "Delete",
+          "Remove"
         ],
         "role": "button"
       },
       "selector_context": {
-        "primary": "text=\"{{database_name}}\"",
-        "alternatives": []
+        "primary": "text=\"Delete Database\"",
+        "alternatives": [
+          "input[type=\"submit\"]",
+          "[role=\"button\"][name=\"Delete Database\"]"
+        ]
       },
       "visual_ref": "visuals/Image_10.jpg"
     }

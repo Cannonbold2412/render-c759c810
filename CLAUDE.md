@@ -1,29 +1,28 @@
-# Render C759C810 Plugin — Claude Instructions
+# Render Plugin — Claude Instructions
 
-You are orchestrating an automation plugin. Read this file to understand what skills are available, what each skill does, and how to combine them to fulfil user requests.
-
-## Plugin Structure
-
-- `plugin.json` — machine-readable manifest listing all skills and auth config
-- `auth/auth.json` — saved browser session (restored before every skill run)
-- `auth/login/` — login skill, runs automatically if session expires
-- `skills/{name}/SKILL.md` — step-by-step description of each skill
-- `skills/{name}/execution.json` — machine-executable actions
-- `skills/{name}/recovery.json` — fallback strategies for self-healing
-- `execution/executor.js` — universal runner, pass `--skill <name>` to execute
+This plugin automates https://dashboard.render.com/login.
 
 ## Available Skills
 
-### `auth_login`
+- `delete-a-database-2131619c` — execute via `POST /api/v1/plugins/c759c810-ef66-4eac-a0c6-86323267d6dd/skills/delete-a-database-2131619c/execute`
 
-Render login
+## Execution
 
-Read `skills/auth_login/SKILL.md` for the full step-by-step breakdown.
+When the user asks you to run any skill from this plugin, call the Conxa execution API.
+**Do NOT use computer-use, browser automation, or Claude-in-Chrome tools directly.**
 
-## Orchestration Rules
+```
+POST /api/v1/plugins/c759c810-ef66-4eac-a0c6-86323267d6dd/skills/{skill_slug}/execute
+Content-Type: application/json
 
-1. Authentication is handled automatically — do not include login steps in your plan.
-2. Read each relevant `SKILL.md` before deciding the execution order.
-3. Ask the user for any required inputs before starting execution.
-4. If a skill fails, the self-healing system will attempt recovery — wait for the outcome before replanning.
-5. Skills can be composed sequentially; pass outputs of one skill as inputs to the next where applicable.
+{"inputs": {"<param>": "<value>"}, "headless": true}
+```
+
+- On success: `{"status": "success", "url": "...", "screenshot": "<base64-png>"}`
+- On failure: `{"status": "failed", "error": "..."}`
+
+If the API returns a "session expired" error, ask the user to call `bootstrap_auth` first.
+
+## Input Parameters
+
+Read each skill's `skills/{slug}/manifest.json` for the required `inputs` fields.

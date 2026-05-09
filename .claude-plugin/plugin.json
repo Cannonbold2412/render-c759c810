@@ -1,10 +1,9 @@
 {
   "name": "render",
   "description": "Conxa plugin for Render",
-  "version": "1.0.1",
+  "version": "0.1.0",
   "author": {
     "name": "Conxa"
   },
-  "license": "MIT",
-  "repository": "https://github.com/Cannonbold2412/render-c759c810"
+  "license": "MIT"
 }

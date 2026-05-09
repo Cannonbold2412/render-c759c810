@@ -12,5 +12,5 @@
 6. scroll
 7. Click text="Delete Database"
 8. focus
-9. Enter {{database_name}}
-10. Click text="{{database_name}}"
+9. Enter sudo delete database {{database_name}}
+10. Click text="Delete Database"

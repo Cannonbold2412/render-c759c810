@@ -273,5 +273,47 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 });
 
-const transport = new StdioServerTransport();
-server.connect(transport);
+const _skillFlagIdx = process.argv.indexOf("--run-skill");
+if (_skillFlagIdx !== -1) {
+  // ── CLI execution mode ────────────────────────────────────────────────────
+  const _skillSlug  = process.argv[_skillFlagIdx + 1];
+  const _inputsIdx  = process.argv.indexOf("--inputs");
+  const _inputs     = _inputsIdx !== -1 ? JSON.parse(process.argv[_inputsIdx + 1]) : {};
+  const _headless   = !process.argv.includes("--no-headless");
+
+  const _skill = (CONFIG.skills || []).find(s => s.slug === _skillSlug);
+  if (!_skill) {
+    process.stdout.write(JSON.stringify({ status: "failed", error: `Skill not found: ${_skillSlug}` }));
+    process.exit(1);
+  }
+
+  getAuthContext(_headless).then(async ({ browser, context }) => {
+    const page = await context.newPage();
+    try {
+      await runSkill(page, path.join(PLUGIN_DIR, _skill.path), _inputs);
+      const url  = page.url();
+      const shot = await page.screenshot({ type: "png" }).catch(() => null);
+      const state = await context.storageState();
+      fs.mkdirSync(path.dirname(AUTH_JSON), { recursive: true });
+      fs.writeFileSync(AUTH_JSON, JSON.stringify(state, null, 2));
+      await browser.close();
+      process.stdout.write(JSON.stringify({
+        status: "success",
+        url,
+        screenshot: shot ? shot.toString("base64") : null,
+      }));
+      process.exit(0);
+    } catch (err) {
+      await browser.close().catch(() => {});
+      process.stdout.write(JSON.stringify({ status: "failed", error: String(err) }));
+      process.exit(1);
+    }
+  }).catch(err => {
+    process.stdout.write(JSON.stringify({ status: "failed", error: String(err) }));
+    process.exit(1);
+  });
+} else {
+  // ── MCP server mode (default) ─────────────────────────────────────────────
+  const transport = new StdioServerTransport();
+  server.connect(transport);
+}
