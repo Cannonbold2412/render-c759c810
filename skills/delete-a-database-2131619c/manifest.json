@@ -1,0 +1,11 @@
+{
+  "name": "delete-a-database-2131619c",
+  "description": "Run the Delete a Database workflow.",
+  "version": "1.0.0",
+  "entry": {
+    "execution": "./execution.json",
+    "recovery": "./recovery.json",
+    "input": "./input.json"
+  },
+  "inputs": []
+}

@@ -1,0 +1,231 @@
+{
+  "steps": [
+    {
+      "step_id": 3,
+      "intent": "focus_on_services_search_bar",
+      "target": {
+        "text": "",
+        "role": "input"
+      },
+      "anchors": [
+        {
+          "text": "search bar",
+          "priority": 2
+        },
+        {
+          "text": "ungrouped services",
+          "priority": 1
+        }
+      ],
+      "fallback": {
+        "text_variants": [],
+        "role": "input"
+      },
+      "selector_context": {
+        "primary": "input[type=\"text\"]",
+        "alternatives": []
+      },
+      "visual_ref": "visuals/Image_3.jpg"
+    },
+    {
+      "step_id": 4,
+      "intent": "enter_input_value",
+      "target": {
+        "text": "",
+        "role": "textbox"
+      },
+      "anchors": [
+        {
+          "text": "search bar",
+          "priority": 2
+        },
+        {
+          "text": "ungrouped services",
+          "priority": 1
+        },
+        {
+          "text": "suspended",
+          "priority": 1
+        },
+        {
+          "text": "active",
+          "priority": 1
+        }
+      ],
+      "fallback": {
+        "text_variants": [],
+        "role": "textbox"
+      },
+      "selector_context": {
+        "primary": "input[type=\"text\"]",
+        "alternatives": []
+      },
+      "visual_ref": "visuals/Image_4.jpg"
+    },
+    {
+      "step_id": 5,
+      "intent": "click_database_name",
+      "target": {
+        "text": "{{database_name}}",
+        "role": "link"
+      },
+      "anchors": [
+        {
+          "text": "{{database_name}}",
+          "priority": 2
+        }
+      ],
+      "fallback": {
+        "text_variants": [
+          "{{database_name}}"
+        ],
+        "role": "link"
+      },
+      "selector_context": {
+        "primary": "text=\"{{database_name}}\"",
+        "alternatives": []
+      },
+      "visual_ref": "visuals/Image_5.jpg"
+    },
+    {
+      "step_id": 7,
+      "intent": "activate_control_delete_database",
+      "target": {
+        "text": "Delete Database",
+        "role": "button"
+      },
+      "anchors": [
+        {
+          "text": "delete database button",
+          "priority": 2
+        },
+        {
+          "text": "database info",
+          "priority": 1
+        },
+        {
+          "text": "database name",
+          "priority": 1
+        },
+        {
+          "text": "Delete Database",
+          "priority": 2
+        }
+      ],
+      "fallback": {
+        "text_variants": [
+          "Delete Database",
+          "Delete",
+          "Remove"
+        ],
+        "role": "button"
+      },
+      "selector_context": {
+        "primary": "text=\"Delete Database\"",
+        "alternatives": [
+          "input[type=\"button\"]",
+          "#delete-database",
+          "[role=\"button\"][name=\"Delete Database\"]"
+        ]
+      },
+      "visual_ref": "visuals/Image_7.jpg"
+    },
+    {
+      "step_id": 8,
+      "intent": "focus_sudocommand",
+      "target": {
+        "text": "sudoCommand",
+        "role": "input"
+      },
+      "anchors": [
+        {
+          "text": "sudocommand",
+          "priority": 2
+        },
+        {
+          "text": "delete database",
+          "priority": 1
+        },
+        {
+          "text": "sudoCommand",
+          "priority": 2
+        }
+      ],
+      "fallback": {
+        "text_variants": [
+          "sudoCommand"
+        ],
+        "role": "input"
+      },
+      "selector_context": {
+        "primary": "input[name=\"sudoCommand\"]",
+        "alternatives": [
+          "input[type=\"text\"]",
+          "#sudo-command"
+        ]
+      },
+      "visual_ref": "visuals/Image_8.jpg"
+    },
+    {
+      "step_id": 9,
+      "intent": "enter_sudo_command",
+      "target": {
+        "text": "sudoCommand",
+        "role": "textbox"
+      },
+      "anchors": [
+        {
+          "text": "sudo delete database conxa-db",
+          "priority": 2
+        },
+        {
+          "text": "delete database",
+          "priority": 1
+        },
+        {
+          "text": "sudoCommand",
+          "priority": 2
+        }
+      ],
+      "fallback": {
+        "text_variants": [
+          "sudoCommand"
+        ],
+        "role": "textbox"
+      },
+      "selector_context": {
+        "primary": "input[name=\"sudoCommand\"]",
+        "alternatives": [
+          "input[type=\"text\"]",
+          "#sudo-command"
+        ]
+      },
+      "visual_ref": "visuals/Image_9.jpg"
+    },
+    {
+      "step_id": 10,
+      "intent": "click_database_name",
+      "target": {
+        "text": "{{database_name}}",
+        "role": "button"
+      },
+      "anchors": [
+        {
+          "text": "{{database_name}}",
+          "priority": 2
+        }
+      ],
+      "fallback": {
+        "text_variants": [
+          "{{database_name}}"
+        ],
+        "role": "button"
+      },
+      "selector_context": {
+        "primary": "text=\"{{database_name}}\"",
+        "alternatives": []
+      },
+      "visual_ref": "visuals/Image_10.jpg"
+    }
+  ]
+}

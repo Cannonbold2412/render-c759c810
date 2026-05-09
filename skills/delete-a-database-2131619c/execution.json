@@ -1,0 +1,116 @@
+[
+  {
+    "type": "navigate",
+    "url": "https://dashboard.render.com/"
+  },
+  {
+    "type": "scroll",
+    "delta_y": 153.0,
+    "url_state": {
+      "before": {
+        "url_pattern": "^https://dashboard\\.render\\.com/$"
+      },
+      "after": {
+        "url_pattern": "^https://dashboard\\.render\\.com/$"
+      }
+    }
+  },
+  {
+    "type": "focus",
+    "selector": "input[type=\"text\"]",
+    "url_state": {
+      "before": {
+        "url_pattern": "^https://dashboard\\.render\\.com/$"
+      },
+      "after": {
+        "url_pattern": "^https://dashboard\\.render\\.com/$"
+      }
+    }
+  },
+  {
+    "type": "type",
+    "selector": "input[type=\"text\"]",
+    "value": "{{database_name}}",
+    "url_state": {
+      "before": {
+        "url_pattern": "^https://dashboard\\.render\\.com/$"
+      },
+      "after": {
+        "url_pattern": "^https://dashboard\\.render\\.com/$"
+      }
+    }
+  },
+  {
+    "type": "click",
+    "selector": "text=\"{{database_name}}\"",
+    "url_state": {
+      "before": {
+        "url_pattern": "^https://dashboard\\.render\\.com/$"
+      },
+      "after": {
+        "url_pattern": "^https://dashboard\\.render\\.com/d/[^/]+$"
+      }
+    }
+  },
+  {
+    "type": "scroll",
+    "delta_y": -153.0,
+    "url_state": {
+      "before": {
+        "url_pattern": "^https://dashboard\\.render\\.com/d/[^/]+$"
+      },
+      "after": {
+        "url_pattern": "^https://dashboard\\.render\\.com/d/[^/]+$"
+      }
+    }
+  },
+  {
+    "type": "click",
+    "selector": "text=\"Delete Database\"",
+    "url_state": {
+      "before": {
+        "url_pattern": "^https://dashboard\\.render\\.com/d/[^/]+$"
+      },
+      "after": {
+        "url_pattern": "^https://dashboard\\.render\\.com/d/[^/]+$"
+      }
+    }
+  },
+  {
+    "type": "focus",
+    "selector": "input[name=\"sudoCommand\"]",
+    "url_state": {
+      "before": {
+        "url_pattern": "^https://dashboard\\.render\\.com/d/[^/]+$"
+      },
+      "after": {
+        "url_pattern": "^https://dashboard\\.render\\.com/d/[^/]+$"
+      }
+    }
+  },
+  {
+    "type": "type",
+    "selector": "input[name=\"sudoCommand\"]",
+    "value": "{{database_name}}",
+    "url_state": {
+      "before": {
+        "url_pattern": "^https://dashboard\\.render\\.com/d/[^/]+$"
+      },
+      "after": {
+        "url_pattern": "^https://dashboard\\.render\\.com/d/[^/]+$"
+      }
+    }
+  },
+  {
+    "type": "click",
+    "selector": "text=\"{{database_name}}\"",
+    "url_state": {
+      "before": {
+        "url_pattern": "^https://dashboard\\.render\\.com/d/[^/]+$"
+      },
+      "after": {
+        "url_pattern": "^https://dashboard\\.render\\.com/$"
+      }
+    }
+  }
+]
