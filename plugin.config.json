@@ -3,7 +3,7 @@
   "id": "c759c810-ef66-4eac-a0c6-86323267d6dd",
   "slug": "render_c759c810",
   "name": "Render",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Conxa plugin for Render",
   "target_url": "https://dashboard.render.com/login",
   "protected_url": "https://dashboard.render.com",
