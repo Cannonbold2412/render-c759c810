@@ -56,14 +56,31 @@ Call:
 ```
 execute_plan(steps: [...merged steps...], inputs: {"key": "value"})
 ```
-The plugin will run a visible Playwright browser and execute all steps.
+The plugin will run a visible Playwright browser and execute all steps. A screenshot is returned on success.
 
 ### Step 5: Handle Failures
 If `execute_plan` returns an error:
 - Check the error message for which step failed
-- Reload the skill files with `read_skill_files`
-- Adjust the plan (different selector, different sequence)
-- Call `execute_plan` again with the fixed plan
+- The step may have recovery alternatives (fallback_selectors, candidates)
+- If recovery fails, reload skill files and adjust the plan
+- Modify selectors or step order and retry `execute_plan`
+- Continue until success or maximum recovery attempts exhausted
+
+---
+
+## Complete Example Flow
+
+**User:** "Delete my database conxa-db"
+
+**You do:**
+1. Call `list_skills` → see available skills
+2. Identify needed skills: `auth_login`, `delete_database`
+3. Call `read_skill_files("auth_login")` → get login steps + recovery
+4. Call `read_skill_files("delete_database")` → get delete steps + recovery
+5. Merge: [login steps] + [navigate to DB] + [delete DB] + [confirm delete]
+6. Call `execute_plan(steps=[merged], inputs={"database": "conxa-db"})`
+7. Browser opens, executes all steps, closes
+8. Return screenshot confirming deletion
 
 ---
 
@@ -79,3 +96,4 @@ If you get: *"Session expired. Ask Claude to call bootstrap_auth first."*
 
 When calling `read_skill_files`, the response includes each step's `inputs` field.
 Look for `{{key}}` placeholders in `value` fields — those are the required inputs to inject.
+Always provide `inputs` to `execute_plan` with actual values, not placeholders.

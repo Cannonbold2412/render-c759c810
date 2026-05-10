@@ -3,12 +3,12 @@
   "id": "c759c810-ef66-4eac-a0c6-86323267d6dd",
   "slug": "render_c759c810",
   "name": "Render",
-  "version": "1.0.6",
+  "version": "0.1.1",
   "description": "Conxa plugin for Render",
   "target_url": "https://dashboard.render.com/login",
   "protected_url": "https://dashboard.render.com",
   "protected_url_marker_text": "",
-  "built_at": 1778431683.4401426,
+  "built_at": 1778433413.1816602,
   "auth": {
     "kind": "session",
     "storage_state": "auth/auth.json",
@@ -43,7 +43,7 @@
   },
   "metadata": {
     "author": "",
-    "repository": "https://github.com/Cannonbold2412/render-c759c810",
+    "repository": "",
     "license": "MIT",
     "tags": []
   }

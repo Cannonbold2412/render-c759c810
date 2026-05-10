@@ -301,6 +301,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     }
     tools.push({ name: skill.slug.replace(/-/g, "_"), description, inputSchema });
   }
+  console.error(`[ListTools] Registering ${tools.length} tools: ${tools.map(t => t.name).join(", ")}`);
   return { tools };
 });
 
@@ -326,14 +327,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
   // ── list_skills ───────────────────────────────────────────────────────────
   if (name === "list_skills") {
-    return { content: [{ type: "text", text: JSON.stringify(CONFIG.skills || [], null, 2) }] };
+    const skills = CONFIG.skills || [];
+    console.error(`[list_skills] Returning ${skills.length} skills: ${skills.map(s => s.slug).join(", ")}`);
+    return { content: [{ type: "text", text: JSON.stringify(skills, null, 2) }] };
   }
 
   // ── read_skill_files ─────────────────────────────────────────────────────
   if (name === "read_skill_files") {
     const slugArg = (args && args.slug) ? String(args.slug) : "";
+    console.error(`[read_skill_files] Looking for skill: ${slugArg}`);
     const skill = (CONFIG.skills || []).find(s => s.slug === slugArg || s.slug === slugArg.replace(/_/g, "-") || s.slug === slugArg.replace(/-/g, "_"));
-    if (!skill) return { content: [{ type: "text", text: `Skill not found: ${slugArg}. Use list_skills to see available skills.` }] };
+    if (!skill) {
+      console.error(`[read_skill_files] Skill not found. Available: ${(CONFIG.skills || []).map(s => s.slug).join(", ")}`);
+      return { content: [{ type: "text", text: `Skill not found: ${slugArg}. Use list_skills to see available skills.` }] };
+    }
     const skillDir = path.join(PLUGIN_DIR, skill.path);
     const execPath = path.join(skillDir, "execution.json");
     const recPath  = path.join(skillDir, "recovery.json");
@@ -343,6 +350,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       execution: fs.existsSync(execPath) ? JSON.parse(fs.readFileSync(execPath, "utf8")) : null,
       recovery:  fs.existsSync(recPath)  ? JSON.parse(fs.readFileSync(recPath,  "utf8")) : null,
     };
+    console.error(`[read_skill_files] Found ${skill.slug}: ${result.execution ? result.execution.length + " steps" : "no execution.json"}`);
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
   }
 
@@ -350,17 +358,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   if (name === "execute_plan") {
     const steps  = (args && Array.isArray(args.steps))  ? args.steps  : [];
     const inputs = (args && typeof args.inputs === "object" && args.inputs) ? args.inputs : {};
+    console.error(`[execute_plan] Starting with ${steps.length} steps, inputs: ${JSON.stringify(inputs)}`);
     if (steps.length === 0) return { content: [{ type: "text", text: "execute_plan: no steps provided." }] };
 
     let _browser, _context;
     try {
       ({ browser: _browser, context: _context } = await getAuthContext(false));
+      console.error(`[execute_plan] Auth context ready`);
     } catch (authErr) {
+      console.error(`[execute_plan] Auth failed: ${authErr}`);
       return { content: [{ type: "text", text: String(authErr) }] };
     }
 
     const page = await _context.newPage();
     try {
+      console.error(`[execute_plan] Running ${steps.length} steps...`);
       await runPlan(page, steps, inputs);
       const state = await _context.storageState();
       fs.mkdirSync(path.dirname(AUTH_JSON), { recursive: true });
@@ -368,10 +380,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const shot = await page.screenshot({ type: "png" }).catch(() => null);
       const url  = page.url();
       await _browser.close();
+      console.error(`[execute_plan] Success! URL: ${url}`);
       const content = [{ type: "text", text: `Plan executed successfully. URL: ${url}` }];
       if (shot) content.push({ type: "image", data: shot.toString("base64"), mimeType: "image/png" });
       return { content };
     } catch (err) {
+      console.error(`[execute_plan] Failed: ${err.message}`);
       await _browser.close().catch(() => {});
       return { content: [{ type: "text", text: `Plan execution failed at: ${err.message}` }] };
     }
