@@ -1,3 +1,7 @@
+## v1.0.5 — 2026-05-10
+
+No release notes provided.
+
 ## v1.0.4 — 2026-05-10
 
 No release notes provided.
