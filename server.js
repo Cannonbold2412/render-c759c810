@@ -84,10 +84,6 @@ async function executeStep(page, step, inputs) {
     await page.locator(sel).first().selectOption(interpolate(step.value || "", inputs), { timeout: 15000 });
     return;
   }
-  if (type === "focus") {
-    if (sel) await page.locator(sel).first().focus({ timeout: 10000 }).catch(() => {});
-    return;
-  }
   if (type === "check") {
     const pattern = interpolate(step.pattern || step.check_pattern || "", inputs);
     if (pattern && !new RegExp(pattern).test(page.url()))
@@ -348,9 +344,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const skillDir = path.join(PLUGIN_DIR, skill.path);
     const execPath = path.join(skillDir, "execution.json");
     const recPath  = path.join(skillDir, "recovery.json");
+    const mdPath   = path.join(skillDir, "SKILL.md");
     const result = {
       slug: skill.slug,
       path: skill.path,
+      skill_md:  fs.existsSync(mdPath)   ? fs.readFileSync(mdPath, "utf8") : null,
       execution: fs.existsSync(execPath) ? JSON.parse(fs.readFileSync(execPath, "utf8")) : null,
       recovery:  fs.existsSync(recPath)  ? JSON.parse(fs.readFileSync(recPath,  "utf8")) : null,
     };

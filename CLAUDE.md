@@ -1,19 +1,9 @@
 # Render Plugin — Claude Instructions
 
-## ⚠️ MANDATORY RULES — READ FIRST
+## ⚠️ MANDATORY RULES
 
-You have a Playwright automation engine built into this plugin. **You do NOT need a web browser. You do NOT need computer-use. You do NOT need Chrome.** The plugin's `execute_plan` tool IS the browser — it opens a visible Chromium window and runs all steps automatically.
-
-**FORBIDDEN — never call these:**
-- `computer_use` / `computer-use`
-- `mcp__Claude_in_Chrome__*`
-- Any screenshot, navigate, or click tool that is NOT from this plugin
-- Asking the user to manually open a browser or click anything
-
-**REQUIRED — always use these plugin tools:**
-- `list_skills` → `read_skill_files` → `execute_plan`
-
-If you catch yourself thinking "I need a browser to do this" — stop. Call `execute_plan`. The plugin opens the browser for you.
+**NEVER use:** `computer_use`, `computer-use`, `mcp__Claude_in_Chrome__*`, or any built-in browser tool.
+**ALWAYS use:** This plugin's MCP tools. `execute_plan` opens a real visible Chromium browser and runs all steps — you do not need any other browser tool.
 
 ---
 
@@ -21,63 +11,72 @@ If you catch yourself thinking "I need a browser to do this" — stop. Call `exe
 
 | Tool | Purpose |
 |------|---------|
-| `bootstrap_auth` | Opens visible browser for user to log in manually. Run once if session expired. |
-| `list_skills` | Returns all available skills with slugs |
-| `read_skill_files(slug)` | Returns execution steps + recovery data for a skill |
-| `execute_plan(steps, inputs)` | **Runs a visible Playwright browser, executes all steps, returns screenshot** |
-| `auth_login(user_email, user_password)` | Automated login shortcut |
-| `delete_a_database_2131619c(database_name)` | Delete a database shortcut |
+| `list_skills` | List available skills |
+| `read_skill_files(slug)` | Returns skill_md, execution steps, and recovery data |
+| `execute_plan(steps, inputs)` | Runs a visible Playwright browser, executes all steps, returns screenshot |
+| `bootstrap_auth` | Opens browser for user to log in manually (only if session expired and no credentials) |
 
 ---
 
 ## Available Skills
 
-- `auth_login` — inputs: `user_email`, `user_password`
-- `delete-a-database-2131619c` — inputs: `database_name`
+- `auth_login` — automates login with email + password
+- `delete-a-database-2131619c` — deletes a database by name
 
 ---
 
 ## Execution Flow
 
-When the user asks you to do something on https://dashboard.render.com:
+When the user asks you to do something, follow this exact order:
 
-### Step 1: Collect Required Inputs
-Before calling anything, identify what inputs are needed.
-- For delete: need `database_name`
-- For login: need `user_email`, `user_password` (or use `bootstrap_auth` for manual login)
-Ask the user for any missing inputs upfront.
+### 1. Read the skill
+Call `read_skill_files` for the relevant skill(s). Read the `skill_md` field — it tells you exactly what inputs are required and what the skill does.
 
-### Step 2: Load Skill Steps
-Call `read_skill_files` for each needed skill:
-```
-read_skill_files(slug: "auth_login")
-read_skill_files(slug: "delete-a-database-2131619c")
-```
+### 2. Ask for inputs
+Based on the `skill_md`, ask the user for any required inputs you don't already have.
+- For delete: ask for `database_name` if not already given
+- For login: ask for `user_email` and `user_password` if credentials are needed
 
-### Step 3: Merge and Execute
-Combine all steps into one array (login steps first), then call:
-```
-execute_plan(
-  steps: [...auth_login steps, ...delete steps],
-  inputs: {"user_email": "...", "user_password": "...", "database_name": "conxa-db"}
-)
-```
-The plugin opens a **visible** Chromium browser, runs every step with auto-recovery, then closes and returns a screenshot.
+### 3. Execute
+Call `execute_plan` with the merged steps and collected inputs.
 
-### Step 4: Handle Auth Errors
-If `execute_plan` returns *"Session expired"*:
-→ Call `bootstrap_auth` (user logs in manually in the visible browser)
-→ Then retry `execute_plan` (skip auth_login steps this time)
+The plugin auto-detects if the user is not logged in. If not authenticated, it will automatically run the login steps before the main skill. So:
+- If you have the user's credentials → include auth_login steps at the start of the plan
+- If you don't have credentials → call `bootstrap_auth` first, then execute without auth steps
+
+### 4. Handle failures
+If `execute_plan` returns an error, re-read the skill files, adjust the plan, and retry.
 
 ---
 
-## Complete Example: "Delete my database conxa-db"
+## Example: "Delete my database conxa-db"
 
-1. Ask user for Render email + password (or check if they want manual login via `bootstrap_auth`)
-2. Call `read_skill_files("auth_login")` → get 5 login steps
-3. Call `read_skill_files("delete-a-database-2131619c")` → get 9 delete steps
-4. Call `execute_plan(steps=[...5 login steps, ...9 delete steps], inputs={"user_email": "user@example.com", "user_password": "secret", "database_name": "conxa-db"})`
-5. Visible browser opens → logs in → navigates to database → deletes it → closes
-6. Return screenshot confirming deletion
+```
+1. Call read_skill_files("delete-a-database-2131619c")
+   → Read skill_md: needs {{database_name}} ✓ (already given: "conxa-db")
 
-**Do NOT ask the user to do anything in a browser. The plugin handles it all.**
+2. Call read_skill_files("auth_login")
+   → Read skill_md: needs {{user_email}}, {{user_password}}
+   → Ask user: "What is your Render email and password?"
+
+3. Once user provides credentials:
+   Call execute_plan(
+     steps: [...auth_login.execution, ...delete.execution],
+     inputs: {
+       user_email: "user@example.com",
+       user_password: "secret",
+       database_name: "conxa-db"
+     }
+   )
+
+4. Visible browser opens → logs in → finds database → deletes it → closes
+5. Return screenshot confirming deletion
+```
+
+If user says "I'm already logged in" or `bootstrap_auth` was already run → skip auth_login steps, execute delete steps only:
+```
+execute_plan(
+  steps: [...delete.execution],
+  inputs: { database_name: "conxa-db" }
+)
+```
