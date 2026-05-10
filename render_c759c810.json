@@ -7,12 +7,6 @@
       "description": "Render login",
       "execution": "skills/auth_login/execution.json",
       "recovery": "skills/auth_login/recovery.json"
-    },
-    {
-      "name": "delete-a-database-2131619c",
-      "description": "Delete a Database",
-      "execution": "skills/delete-a-database-2131619c/execution.json",
-      "recovery": "skills/delete-a-database-2131619c/recovery.json"
     }
   ]
 }

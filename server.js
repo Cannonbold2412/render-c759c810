@@ -294,7 +294,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       catch (_) {}
     }
     if (fs.existsSync(iPath)) {
-      try { inputSchema = JSON.parse(fs.readFileSync(iPath, "utf8")); } catch (_) {}
+      try {
+        const loaded = JSON.parse(fs.readFileSync(iPath, "utf8"));
+        inputSchema = { type: "object", ...loaded };
+      } catch (_) {}
     }
     tools.push({ name: skill.slug.replace(/-/g, "_"), description, inputSchema });
   }
