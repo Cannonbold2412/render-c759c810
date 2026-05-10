@@ -84,6 +84,10 @@ async function executeStep(page, step, inputs) {
     await page.locator(sel).first().selectOption(interpolate(step.value || "", inputs), { timeout: 15000 });
     return;
   }
+  if (type === "focus") {
+    if (sel) await page.locator(sel).first().focus({ timeout: 10000 }).catch(() => {});
+    return;
+  }
   if (type === "check") {
     const pattern = interpolate(step.pattern || step.check_pattern || "", inputs);
     if (pattern && !new RegExp(pattern).test(page.url()))
@@ -345,10 +349,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const execPath = path.join(skillDir, "execution.json");
     const recPath  = path.join(skillDir, "recovery.json");
     const mdPath   = path.join(skillDir, "SKILL.md");
+    const iPath    = path.join(skillDir, "input.json");
+    const inputSchema = fs.existsSync(iPath) ? JSON.parse(fs.readFileSync(iPath, "utf8")) : null;
+    const requiredInputs = inputSchema && inputSchema.required ? inputSchema.required : [];
     const result = {
       slug: skill.slug,
-      path: skill.path,
-      skill_md:  fs.existsSync(mdPath)   ? fs.readFileSync(mdPath, "utf8") : null,
+      skill_md:       fs.existsSync(mdPath)   ? fs.readFileSync(mdPath, "utf8") : null,
+      required_inputs: requiredInputs,
+      instruction:    requiredInputs.length > 0
+        ? `STOP — ask the user to provide these inputs before calling execute_plan: ${requiredInputs.join(", ")}`
+        : "No inputs required. You may call execute_plan directly.",
       execution: fs.existsSync(execPath) ? JSON.parse(fs.readFileSync(execPath, "utf8")) : null,
       recovery:  fs.existsSync(recPath)  ? JSON.parse(fs.readFileSync(recPath,  "utf8")) : null,
     };

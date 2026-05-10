@@ -3,7 +3,7 @@
 ## ⚠️ MANDATORY RULES
 
 **NEVER use:** `computer_use`, `computer-use`, `mcp__Claude_in_Chrome__*`, or any built-in browser tool.
-**ALWAYS use:** This plugin's MCP tools. `execute_plan` opens a real visible Chromium browser and runs all steps — you do not need any other browser tool.
+**The plugin's `execute_plan` tool IS the browser.** It opens a real visible Chromium window and executes all steps. You never need to navigate anywhere yourself.
 
 ---
 
@@ -11,72 +11,62 @@
 
 | Tool | Purpose |
 |------|---------|
-| `list_skills` | List available skills |
-| `read_skill_files(slug)` | Returns skill_md, execution steps, and recovery data |
-| `execute_plan(steps, inputs)` | Runs a visible Playwright browser, executes all steps, returns screenshot |
-| `bootstrap_auth` | Opens browser for user to log in manually (only if session expired and no credentials) |
+| `read_skill_files(slug)` | Read SKILL.md, required inputs, and execution steps for a skill |
+| `execute_plan(steps, inputs)` | Run a visible Playwright browser with the given steps and inputs |
+| `list_skills` | List available skill slugs |
+| `bootstrap_auth` | Open browser for manual login (only if user has no credentials) |
 
 ---
 
-## Available Skills
+## Exact Flow — Follow This Every Time
 
-- `auth_login` — automates login with email + password
-- `delete-a-database-2131619c` — deletes a database by name
+### Step 1: Read the skill
+Call `read_skill_files` for the skill needed. Read the `skill_md` and `required_inputs` fields.
 
----
+### Step 2: Check auth
+Call `read_skill_files("auth_login")`. If the user has not provided credentials yet, ask:
+- "What is your Render email and password?"
 
-## Execution Flow
+If the user says they are already logged in or `bootstrap_auth` was already run, skip auth.
 
-When the user asks you to do something, follow this exact order:
+### Step 3: Ask for inputs — DO NOT SKIP THIS STEP
+The `read_skill_files` response contains an `instruction` field.
+**If `instruction` says "STOP — ask the user..."**, you MUST ask the user for those inputs before doing anything else.
+Do NOT call `execute_plan` until the user has given you all required inputs in this conversation.
 
-### 1. Read the skill
-Call `read_skill_files` for the relevant skill(s). Read the `skill_md` field — it tells you exactly what inputs are required and what the skill does.
+### Step 4: Execute
+Once you have all inputs from the user, call:
+```
+execute_plan(
+  steps: [...auth_login.execution (if needed), ...skill.execution],
+  inputs: { all collected inputs }
+)
+```
 
-### 2. Ask for inputs
-Based on the `skill_md`, ask the user for any required inputs you don't already have.
-- For delete: ask for `database_name` if not already given
-- For login: ask for `user_email` and `user_password` if credentials are needed
-
-### 3. Execute
-Call `execute_plan` with the merged steps and collected inputs.
-
-The plugin auto-detects if the user is not logged in. If not authenticated, it will automatically run the login steps before the main skill. So:
-- If you have the user's credentials → include auth_login steps at the start of the plan
-- If you don't have credentials → call `bootstrap_auth` first, then execute without auth steps
-
-### 4. Handle failures
-If `execute_plan` returns an error, re-read the skill files, adjust the plan, and retry.
+### Step 5: Handle auth errors
+If `execute_plan` returns "Session expired" → call `bootstrap_auth`, then retry execute_plan without auth steps.
 
 ---
 
 ## Example: "Delete my database conxa-db"
 
 ```
-1. Call read_skill_files("delete-a-database-2131619c")
-   → Read skill_md: needs {{database_name}} ✓ (already given: "conxa-db")
+1. read_skill_files("delete-a-database-2131619c")
+   → instruction: "STOP — ask user for: database_name"
+   → database_name already given in prompt: "conxa-db" ✓
 
-2. Call read_skill_files("auth_login")
-   → Read skill_md: needs {{user_email}}, {{user_password}}
-   → Ask user: "What is your Render email and password?"
+2. read_skill_files("auth_login")
+   → instruction: "STOP — ask user for: user_email, user_password"
+   → Ask: "Please provide your Render email and password."
 
-3. Once user provides credentials:
-   Call execute_plan(
-     steps: [...auth_login.execution, ...delete.execution],
-     inputs: {
-       user_email: "user@example.com",
-       user_password: "secret",
-       database_name: "conxa-db"
-     }
+3. User replies with credentials.
+
+4. execute_plan(
+     steps: [...auth_login steps, ...delete steps],
+     inputs: { user_email: "...", user_password: "...", database_name: "conxa-db" }
    )
 
-4. Visible browser opens → logs in → finds database → deletes it → closes
-5. Return screenshot confirming deletion
+5. Visible browser opens → logs in → deletes database → returns screenshot
 ```
 
-If user says "I'm already logged in" or `bootstrap_auth` was already run → skip auth_login steps, execute delete steps only:
-```
-execute_plan(
-  steps: [...delete.execution],
-  inputs: { database_name: "conxa-db" }
-)
-```
+**Never skip step 3. Never use placeholder values. Never call execute_plan before the user has confirmed their inputs.**
