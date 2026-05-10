@@ -1,3 +1,10 @@
 {
-  "inputs": []
+  "type": "object",
+  "properties": {
+    "database_name": {
+      "type": "string",
+      "description": "Name of the database to delete (e.g. conxa-db)"
+    }
+  },
+  "required": ["database_name"]
 }

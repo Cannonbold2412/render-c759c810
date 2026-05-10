@@ -1,0 +1,14 @@
+{
+  "type": "object",
+  "properties": {
+    "user_email": {
+      "type": "string",
+      "description": "Render account email address"
+    },
+    "user_password": {
+      "type": "string",
+      "description": "Render account password"
+    }
+  },
+  "required": ["user_email", "user_password"]
+}

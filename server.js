@@ -84,6 +84,10 @@ async function executeStep(page, step, inputs) {
     await page.locator(sel).first().selectOption(interpolate(step.value || "", inputs), { timeout: 15000 });
     return;
   }
+  if (type === "focus") {
+    if (sel) await page.locator(sel).first().focus({ timeout: 10000 }).catch(() => {});
+    return;
+  }
   if (type === "check") {
     const pattern = interpolate(step.pattern || step.check_pattern || "", inputs);
     if (pattern && !new RegExp(pattern).test(page.url()))
