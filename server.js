@@ -159,6 +159,59 @@ async function runSkill(page, skillDir, inputs) {
   }
 }
 
+async function runPlan(page, steps, inputs) {
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i];
+    try {
+      if (step.url_state && step.url_state.before && step.url_state.before.url_pattern) {
+        await waitForUrlState(page, step.url_state.before);
+      }
+      await executeStep(page, step, inputs);
+      if (step.url_state && step.url_state.after && step.url_state.after.url_pattern) {
+        await waitForUrlState(page, step.url_state.after);
+      }
+    } catch (err) {
+      // Layer 1: step-embedded alternative selectors
+      const candidates = Array.from(new Set([
+        ...(Array.isArray(step.fallback_selectors) ? step.fallback_selectors : []),
+        ...(Array.isArray(step.candidates) ? step.candidates : []),
+        ...(Array.isArray(step.anchors) ? step.anchors.filter(a => a && typeof a.text === "string").map(a => `text=${JSON.stringify(a.text.trim())}`) : []),
+        ...(Array.isArray(step.fallback_text_variants) ? step.fallback_text_variants.map(t => `text=${JSON.stringify(String(t).trim())}`) : []),
+      ].filter(Boolean)));
+
+      let recovered = false;
+      // Layer 2: try each candidate selector
+      for (const cand of candidates) {
+        if (await tryLocator(page, cand, 3000)) {
+          try {
+            await executeStep(page, { ...step, selector: cand }, inputs);
+            if (step.url_state && step.url_state.after && step.url_state.after.url_pattern) {
+              await waitForUrlState(page, step.url_state.after);
+            }
+            recovered = true;
+            break;
+          } catch (_) {}
+        }
+      }
+      // Layer 3: derive text selector from step value or label
+      if (!recovered) {
+        const textHints = [step.value, step.label, step.aria_label].filter(v => v && typeof v === "string" && v.length < 60);
+        for (const hint of textHints) {
+          const textSel = `text=${JSON.stringify(hint.trim())}`;
+          if (await tryLocator(page, textSel, 3000)) {
+            try {
+              await executeStep(page, { ...step, selector: textSel }, inputs);
+              recovered = true;
+              break;
+            } catch (_) {}
+          }
+        }
+      }
+      if (!recovered) throw new Error(`Step ${i} (${step.type}) failed: ${err.message}`);
+    }
+  }
+}
+
 // ─── Session management ───────────────────────────────────────────────────────
 
 async function isAuthenticated(page) {
@@ -208,11 +261,28 @@ const server = new Server(
 );
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
-  const tools = [{
-    name: "bootstrap_auth",
-    description: `Set up your ${CONFIG.name} session. Opens a browser — log in, then close the window. Run once before using any skill.`,
-    inputSchema: { type: "object", properties: {}, required: [] },
-  }];
+  const tools = [
+    {
+      name: "bootstrap_auth",
+      description: `Set up your ${CONFIG.name} session. Opens a browser — log in, then close the window. Run once before using any skill.`,
+      inputSchema: { type: "object", properties: {}, required: [] },
+    },
+    {
+      name: "list_skills",
+      description: "List all available skills with metadata",
+      inputSchema: { type: "object", properties: {}, required: [] },
+    },
+    {
+      name: "read_skill_files",
+      description: "Read execution.json and recovery.json for a skill. Returns steps and recovery info for planning.",
+      inputSchema: { type: "object", properties: { slug: { type: "string", description: "Skill slug (use underscores or hyphens)" } }, required: ["slug"] },
+    },
+    {
+      name: "execute_plan",
+      description: "Execute a merged multi-skill plan via Playwright. Accepts steps array (merged from multiple execution.json files). Runs visible browser.",
+      inputSchema: { type: "object", properties: { steps: { type: "array", description: "Merged array of execution steps from one or more skills" }, inputs: { type: "object", description: "Input values to substitute into step placeholders" } }, required: ["steps"] },
+    },
+  ];
 
   for (const skill of (CONFIG.skills || [])) {
     let description = `Execute ${skill.slug} on ${CONFIG.target_url}`;
@@ -251,25 +321,85 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     return { content: [{ type: "text", text: `Session saved. You can now use ${CONFIG.name} skills.` }] };
   }
 
+  // ── list_skills ───────────────────────────────────────────────────────────
+  if (name === "list_skills") {
+    return { content: [{ type: "text", text: JSON.stringify(CONFIG.skills || [], null, 2) }] };
+  }
+
+  // ── read_skill_files ─────────────────────────────────────────────────────
+  if (name === "read_skill_files") {
+    const slugArg = (args && args.slug) ? String(args.slug) : "";
+    const skill = (CONFIG.skills || []).find(s => s.slug === slugArg || s.slug === slugArg.replace(/_/g, "-") || s.slug === slugArg.replace(/-/g, "_"));
+    if (!skill) return { content: [{ type: "text", text: `Skill not found: ${slugArg}. Use list_skills to see available skills.` }] };
+    const skillDir = path.join(PLUGIN_DIR, skill.path);
+    const execPath = path.join(skillDir, "execution.json");
+    const recPath  = path.join(skillDir, "recovery.json");
+    const result = {
+      slug: skill.slug,
+      path: skill.path,
+      execution: fs.existsSync(execPath) ? JSON.parse(fs.readFileSync(execPath, "utf8")) : null,
+      recovery:  fs.existsSync(recPath)  ? JSON.parse(fs.readFileSync(recPath,  "utf8")) : null,
+    };
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+  }
+
+  // ── execute_plan ─────────────────────────────────────────────────────────
+  if (name === "execute_plan") {
+    const steps  = (args && Array.isArray(args.steps))  ? args.steps  : [];
+    const inputs = (args && typeof args.inputs === "object" && args.inputs) ? args.inputs : {};
+    if (steps.length === 0) return { content: [{ type: "text", text: "execute_plan: no steps provided." }] };
+
+    let _browser, _context;
+    try {
+      ({ browser: _browser, context: _context } = await getAuthContext(false));
+    } catch (authErr) {
+      return { content: [{ type: "text", text: String(authErr) }] };
+    }
+
+    const page = await _context.newPage();
+    try {
+      await runPlan(page, steps, inputs);
+      const state = await _context.storageState();
+      fs.mkdirSync(path.dirname(AUTH_JSON), { recursive: true });
+      fs.writeFileSync(AUTH_JSON, JSON.stringify(state, null, 2));
+      const shot = await page.screenshot({ type: "png" }).catch(() => null);
+      const url  = page.url();
+      await _browser.close();
+      const content = [{ type: "text", text: `Plan executed successfully. URL: ${url}` }];
+      if (shot) content.push({ type: "image", data: shot.toString("base64"), mimeType: "image/png" });
+      return { content };
+    } catch (err) {
+      await _browser.close().catch(() => {});
+      return { content: [{ type: "text", text: `Plan execution failed at: ${err.message}` }] };
+    }
+  }
+
   const skillSlug = name.replace(/_/g, "-");
   const skill = (CONFIG.skills || []).find(s => s.slug === skillSlug);
   if (!skill) throw new Error(`Unknown tool: ${name}`);
 
-  const { browser, context } = await getAuthContext();
-  const page = await context.newPage();
+  let _browser, _context;
+  try {
+    ({ browser: _browser, context: _context } = await getAuthContext(false));
+  } catch (authErr) {
+    return { content: [{ type: "text", text: String(authErr) }] };
+  }
+
+  const page = await _context.newPage();
   try {
     await runSkill(page, path.join(PLUGIN_DIR, skill.path), args || {});
-    const state = await context.storageState();
+    const state = await _context.storageState();
+    fs.mkdirSync(path.dirname(AUTH_JSON), { recursive: true });
     fs.writeFileSync(AUTH_JSON, JSON.stringify(state, null, 2));
-    const shot  = await page.screenshot({ type: "png" }).catch(() => null);
-    const url   = page.url();
-    await browser.close();
+    const shot = await page.screenshot({ type: "png" }).catch(() => null);
+    const url  = page.url();
+    await _browser.close();
     const content = [{ type: "text", text: `${skill.slug} completed. URL: ${url}` }];
     if (shot) content.push({ type: "image", data: shot.toString("base64"), mimeType: "image/png" });
     return { content };
   } catch (err) {
-    await browser.close().catch(() => {});
-    throw err;
+    await _browser.close().catch(() => {});
+    return { content: [{ type: "text", text: `Skill failed: ${err}` }] };
   }
 });
 
@@ -279,7 +409,7 @@ if (_skillFlagIdx !== -1) {
   const _skillSlug  = process.argv[_skillFlagIdx + 1];
   const _inputsIdx  = process.argv.indexOf("--inputs");
   const _inputs     = _inputsIdx !== -1 ? JSON.parse(process.argv[_inputsIdx + 1]) : {};
-  const _headless   = !process.argv.includes("--no-headless");
+  const _headless   = process.argv.includes("--headless");
 
   const _skill = (CONFIG.skills || []).find(s => s.slug === _skillSlug);
   if (!_skill) {

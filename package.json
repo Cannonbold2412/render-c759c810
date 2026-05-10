@@ -4,6 +4,7 @@
   "description": "Conxa plugin for Render",
   "main": "server.js",
   "scripts": {
+    "prestart": "npm install --prefer-offline --silent",
     "start": "node server.js"
   },
   "dependencies": {
