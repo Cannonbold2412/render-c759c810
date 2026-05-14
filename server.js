@@ -508,7 +508,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const { steps, inputs, slug } = resolved[si];
         const startAt = si === 0 ? resumeFrom : 0;
         console.error(`[execute_plan] Running ${slug} (${steps.length} steps, starting at ${startAt})...`);
-        await runPlan(page, steps, inputs, startAt);
+        try {
+          await runPlan(page, steps, inputs, startAt);
+        } catch (runErr) {
+          runErr.skillSlug = slug;
+          throw runErr;
+        }
       }
       const state = await _context.storageState();
       fs.mkdirSync(path.dirname(AUTH_JSON), { recursive: true });
@@ -521,10 +526,30 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       if (shot) content.push({ type: "image", data: shot.toString("base64"), mimeType: "image/png" });
       return { content };
     } catch (err) {
-      const url  = page.url();
-      const failedAt = typeof err.failedAt === "number" ? err.failedAt : null;
+      const url     = page.url();
+      const failedAt   = typeof err.failedAt === "number" ? err.failedAt : null;
+      const failedSlug = err.skillSlug || null;
 
-      // Layer 3: LLM intent recovery — extract interactive page elements as structured text
+      // Layer 3: vision recovery — reference image (red box = target) + current screenshot
+      const shot = await page.screenshot({ type: "png" }).catch(() => null);
+      let visualRefData = null, visualRefMime = null;
+      if (failedSlug && failedAt !== null) {
+        const failedSkill = (CONFIG.skills || []).find(s => s.slug === failedSlug);
+        if (failedSkill) {
+          const visualDir = path.join(PLUGIN_DIR, failedSkill.path, "visuals");
+          const stepNum   = failedAt + 1;
+          for (const ext of [".jpg", ".jpeg", ".png"]) {
+            const candidate = path.join(visualDir, `Image_${stepNum}${ext}`);
+            if (fs.existsSync(candidate)) {
+              visualRefData = fs.readFileSync(candidate).toString("base64");
+              visualRefMime = ext === ".png" ? "image/png" : "image/jpeg";
+              break;
+            }
+          }
+        }
+      }
+
+      // Layer 4: LLM intent recovery — extract interactive page elements as structured text
       let pageStructure = null;
       try {
         pageStructure = await page.evaluate(() => {
@@ -545,9 +570,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         });
       } catch (_) {}
 
-      // Layer 4: vision recovery — screenshot for visual diagnosis
-      const shot = await page.screenshot({ type: "png" }).catch(() => null);
-
       await _browser.close().catch(() => {});
       console.error(`[execute_plan] Failed: ${err.message}`);
 
@@ -558,13 +580,22 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const content = [
         { type: "text", text: `Execution failed: ${err.message}\nPage URL: ${url}${resumeHint}` },
       ];
+
+      // Layer 3 output
+      if (visualRefData) {
+        content.push({ type: "text", text: `Layer 3 — vision recovery: reference image (red box = where step ${failedAt + 1} should interact). Compare with current page to locate the element.` });
+        content.push({ type: "image", data: visualRefData, mimeType: visualRefMime });
+        content.push({ type: "text", text: "Current page at point of failure:" });
+      } else {
+        content.push({ type: "text", text: `Layer 3 — vision recovery (no reference image for step ${failedAt + 1}). Current page at point of failure:` });
+      }
+      if (shot) content.push({ type: "image", data: shot.toString("base64"), mimeType: "image/png" });
+
+      // Layer 4 output
       if (pageStructure) {
-        content.push({ type: "text", text: `Layer 3 — intent recovery (interactive elements on page):\n${JSON.stringify(pageStructure, null, 2)}` });
+        content.push({ type: "text", text: `Layer 4 — intent recovery (interactive elements on page):\n${JSON.stringify(pageStructure, null, 2)}` });
       }
-      if (shot) {
-        content.push({ type: "text", text: "Layer 4 — vision recovery (screenshot of page at point of failure):" });
-        content.push({ type: "image", data: shot.toString("base64"), mimeType: "image/png" });
-      }
+
       return { content };
     }
   }
