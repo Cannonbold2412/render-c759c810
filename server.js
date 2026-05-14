@@ -199,8 +199,8 @@ async function runSkill(page, skillDir, inputs) {
   }
 }
 
-async function runPlan(page, steps, inputs) {
-  for (let i = 0; i < steps.length; i++) {
+async function runPlan(page, steps, inputs, startFrom = 0) {
+  for (let i = startFrom; i < steps.length; i++) {
     const step = steps[i];
     try {
       if (step.url_state && step.url_state.before && step.url_state.before.url_pattern) {
@@ -266,7 +266,12 @@ async function runPlan(page, steps, inputs) {
           if (recovered) break;
         }
       }
-      if (!recovered) throw new Error(`Step ${i} (${step.type}) failed: ${err.message}`);
+      if (!recovered) {
+        const e = new Error(`Step ${i + 1} (${step.type}) failed: ${err.message}`);
+        e.failedAt = i;
+        e.failedStep = step;
+        throw e;
+      }
     }
   }
 }
@@ -360,7 +365,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     },
     {
       name: "execute_plan",
-      description: "Run one or more Render skills in sequence in a single browser session. Auth is 100% automatic — never ask about login. Call immediately once inputs are ready. Format: { skills: [{ slug, inputs }] }. Single: { skills: [{ slug: 'delete-a-database-2131619c', inputs: { database_name: 'conxa-db' } }] }. Multi: { skills: [{ slug: 'deploy-service', inputs: {...} }, { slug: 'delete-a-database-2131619c', inputs: {...} }] }.",
+      description: "Run one or more Render skills in sequence in a single browser session. Auth is 100% automatic — never ask about login. Call immediately once inputs are ready. Format: { skills: [{ slug, inputs }] }. Single: { skills: [{ slug: 'delete-a-database-2131619c', inputs: { database_name: 'conxa-db' } }] }. Multi: { skills: [{ slug: 'deploy-service', inputs: {...} }, { slug: 'delete-a-database-2131619c', inputs: {...} }] }. On failure: a screenshot is returned — inspect it visually (Layer 4), fix execution.json, then retry with resume_from set to the failed step index shown in the error.",
       inputSchema: {
         type: "object",
         properties: {
@@ -375,6 +380,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               },
               required: ["slug"],
             },
+          },
+          resume_from: {
+            type: "integer",
+            description: "0-based step index to resume from. Skips steps before this index. Use after fixing execution.json to retry without repeating successful steps.",
           },
         },
         required: ["skills"],
@@ -491,11 +500,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return { content: [{ type: "text", text: String(authErr) }] };
     }
 
+    const resumeFrom = (Number.isInteger(args.resume_from) && args.resume_from > 0)
+      ? args.resume_from : 0;
+
     const page = await _context.newPage();
     try {
-      for (const { steps, inputs, slug } of resolved) {
-        console.error(`[execute_plan] Running ${slug} (${steps.length} steps)...`);
-        await runPlan(page, steps, inputs);
+      for (let si = 0; si < resolved.length; si++) {
+        const { steps, inputs, slug } = resolved[si];
+        const startAt = si === 0 ? resumeFrom : 0;
+        console.error(`[execute_plan] Running ${slug} (${steps.length} steps, starting at ${startAt})...`);
+        await runPlan(page, steps, inputs, startAt);
       }
       const state = await _context.storageState();
       fs.mkdirSync(path.dirname(AUTH_JSON), { recursive: true });
@@ -508,8 +522,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       if (shot) content.push({ type: "image", data: shot.toString("base64"), mimeType: "image/png" });
       return { content };
     } catch (err) {
+      const shot = await page.screenshot({ type: "png" }).catch(() => null);
+      const url  = page.url();
       await _browser.close().catch(() => {});
-      return { content: [{ type: "text", text: `Execution failed: ${err.message}` }] };
+      const failedAt = typeof err.failedAt === "number" ? err.failedAt : null;
+      const hint = failedAt !== null
+        ? `\n\nFailed at step ${failedAt + 1} (0-based index: ${failedAt}).\nLayer 3+4 recovery: look at the screenshot to see the page state, identify the correct selector, edit execution.json step ${failedAt + 1}, then call execute_plan again with resume_from: ${failedAt}.`
+        : "";
+      console.error(`[execute_plan] Failed: ${err.message}`);
+      const content = [{ type: "text", text: `Execution failed: ${err.message}${hint}\nPage URL at failure: ${url}` }];
+      if (shot) content.push({ type: "image", data: shot.toString("base64"), mimeType: "image/png" });
+      return { content };
     }
   }
 
