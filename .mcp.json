@@ -1,12 +1,10 @@
 {
-  "mcpServers": {
-    "render_c759c810": {
-      "command": "npm",
-      "args": [
-        "--prefix",
-        "${CLAUDE_PLUGIN_ROOT}",
-        "start"
-      ]
-    }
+  "render_c759c810": {
+    "command": "npm",
+    "args": [
+      "--prefix",
+      "${CLAUDE_PLUGIN_ROOT}",
+      "start"
+    ]
   }
 }
