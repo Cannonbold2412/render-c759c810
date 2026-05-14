@@ -212,17 +212,27 @@ async function runPlan(page, steps, inputs, startFrom = 0) {
       }
     } catch (err) {
       const sel = interpolate(step.selector || step.css_selector || (step.target && step.target.css) || "", inputs);
-      // Layer 1: step-embedded alternative selectors
-      const candidates = Array.from(new Set([
-        ...(Array.isArray(step.fallback_selectors) ? step.fallback_selectors : []),
+
+      // Layer 1: selector alternatives + text-variant fallback
+      const l1 = Array.from(new Set([
         ...(Array.isArray(step.candidates) ? step.candidates : []),
-        ...(Array.isArray(step.anchors) ? step.anchors.filter(a => a && typeof a.text === "string").map(a => `text=${JSON.stringify(a.text.trim())}`) : []),
+        ...(Array.isArray(step.fallback_selectors) ? step.fallback_selectors : []),
         ...(Array.isArray(step.fallback_text_variants) ? step.fallback_text_variants.map(t => `text=${JSON.stringify(String(t).trim())}`) : []),
+        // text-variant fallback derived from step metadata
+        ...[step.value, step.label, step.aria_label]
+          .filter(v => v && typeof v === "string" && v.length < 60)
+          .map(v => `text=${JSON.stringify(v.trim())}`),
+      ].filter(Boolean)));
+
+      // Layer 2: anchor-based selectors
+      const l2 = Array.from(new Set([
+        ...(Array.isArray(step.anchors) ? step.anchors.filter(a => a && typeof a.text === "string").map(a => `text=${JSON.stringify(a.text.trim())}`) : []),
       ].filter(Boolean)));
 
       let recovered = false;
-      // Layer 2: try each candidate selector
-      for (const cand of candidates) {
+
+      // Try Layer 1, then Layer 2
+      for (const cand of [...l1, ...l2]) {
         if (await tryLocator(page, cand, 3000)) {
           try {
             await executeStep(page, { ...step, selector: cand }, inputs);
@@ -234,24 +244,11 @@ async function runPlan(page, steps, inputs, startFrom = 0) {
           } catch (_) {}
         }
       }
-      // Layer 3: derive text selector from step value or label
-      if (!recovered) {
-        const textHints = [step.value, step.label, step.aria_label].filter(v => v && typeof v === "string" && v.length < 60);
-        for (const hint of textHints) {
-          const textSel = `text=${JSON.stringify(hint.trim())}`;
-          if (await tryLocator(page, textSel, 3000)) {
-            try {
-              await executeStep(page, { ...step, selector: textSel }, inputs);
-              recovered = true;
-              break;
-            } catch (_) {}
-          }
-        }
-      }
-      // Layer 4: modal-scoped click — dialogs intercept pointer events on the backdrop button
+
+      // Layer 2 (extended): anchor-scoped selectors — scope primary selector inside known dialog containers
       if (!recovered && step.type === "click" && sel) {
-        const modalContainers = ['[role="dialog"]', '[role="alertdialog"]', '[aria-modal="true"]', ".modal"];
-        for (const container of modalContainers) {
+        const dialogContainers = ['[role="dialog"]', '[role="alertdialog"]', '[aria-modal="true"]', ".modal"];
+        for (const container of dialogContainers) {
           const scoped = `${container} ${sel}`;
           if (await tryLocator(page, scoped, 2000)) {
             try {
@@ -266,6 +263,8 @@ async function runPlan(page, steps, inputs, startFrom = 0) {
           if (recovered) break;
         }
       }
+
+      // Layer 0: terminal — all selector layers exhausted; runtime returns screenshot for Layer 3+4 recovery
       if (!recovered) {
         const e = new Error(`Step ${i + 1} (${step.type}) failed: ${err.message}`);
         e.failedAt = i;
@@ -522,16 +521,50 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       if (shot) content.push({ type: "image", data: shot.toString("base64"), mimeType: "image/png" });
       return { content };
     } catch (err) {
-      const shot = await page.screenshot({ type: "png" }).catch(() => null);
       const url  = page.url();
-      await _browser.close().catch(() => {});
       const failedAt = typeof err.failedAt === "number" ? err.failedAt : null;
-      const hint = failedAt !== null
-        ? `\n\nFailed at step ${failedAt + 1} (0-based index: ${failedAt}).\nLayer 3+4 recovery: look at the screenshot to see the page state, identify the correct selector, edit execution.json step ${failedAt + 1}, then call execute_plan again with resume_from: ${failedAt}.`
-        : "";
+
+      // Layer 3: LLM intent recovery — extract interactive page elements as structured text
+      let pageStructure = null;
+      try {
+        pageStructure = await page.evaluate(() => {
+          const seen = new Set();
+          return Array.from(document.querySelectorAll(
+            'button, a[href], input, select, textarea, [role="button"], [role="link"], [role="menuitem"], [role="option"]'
+          )).map(el => {
+            const text = (el.innerText || el.value || el.getAttribute("aria-label") || el.getAttribute("placeholder") || "").trim().slice(0, 80);
+            const tag  = el.tagName.toLowerCase();
+            const type = el.getAttribute("type") || "";
+            const role = el.getAttribute("role") || "";
+            const key  = `${tag}|${type}|${text}`;
+            if (!text && !type) return null;
+            if (seen.has(key)) return null;
+            seen.add(key);
+            return { tag, type: type || undefined, role: role || undefined, text: text || undefined };
+          }).filter(Boolean).slice(0, 60);
+        });
+      } catch (_) {}
+
+      // Layer 4: vision recovery — screenshot for visual diagnosis
+      const shot = await page.screenshot({ type: "png" }).catch(() => null);
+
+      await _browser.close().catch(() => {});
       console.error(`[execute_plan] Failed: ${err.message}`);
-      const content = [{ type: "text", text: `Execution failed: ${err.message}${hint}\nPage URL at failure: ${url}` }];
-      if (shot) content.push({ type: "image", data: shot.toString("base64"), mimeType: "image/png" });
+
+      const resumeHint = failedAt !== null
+        ? `\nTo fix: update execution.json step ${failedAt + 1} with the correct selector, then call execute_plan again with resume_from: ${failedAt}.`
+        : "";
+
+      const content = [
+        { type: "text", text: `Execution failed: ${err.message}\nPage URL: ${url}${resumeHint}` },
+      ];
+      if (pageStructure) {
+        content.push({ type: "text", text: `Layer 3 — intent recovery (interactive elements on page):\n${JSON.stringify(pageStructure, null, 2)}` });
+      }
+      if (shot) {
+        content.push({ type: "text", text: "Layer 4 — vision recovery (screenshot of page at point of failure):" });
+        content.push({ type: "image", data: shot.toString("base64"), mimeType: "image/png" });
+      }
       return { content };
     }
   }
