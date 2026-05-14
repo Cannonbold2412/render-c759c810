@@ -16,9 +16,7 @@ const path = require("path");
 const PLUGIN_DIR    = path.dirname(require.main.filename);
 const CONFIG        = JSON.parse(fs.readFileSync(path.join(PLUGIN_DIR, "plugin.config.json"), "utf8"));
 const AUTH_JSON     = path.join(PLUGIN_DIR, "auth", "auth.json");
-const LOGIN_DIR     = path.join(PLUGIN_DIR, "auth", "login");
 const PROTECTED_URL = "https://dashboard.render.com";
-const MARKER_TEXT   = "";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -48,6 +46,38 @@ async function waitForUrlState(page, urlState) {
   }
 
   throw new Error(`URL ${currentUrl} does not match expected pattern ${urlState.url_pattern}`);
+}
+
+// ─── Recovery embedding ───────────────────────────────────────────────────────
+
+// Merge recovery.json entries into execution steps so runPlan's Layer 1 logic
+// can use selector alternatives, fallback text variants, and anchors.
+function enrichStepsWithRecovery(steps, recovery) {
+  if (!Array.isArray(steps)) return steps;
+  const recSteps = (recovery && Array.isArray(recovery.steps)) ? recovery.steps : [];
+  return steps.map((step, idx) => {
+    const rec = recSteps.find(r => Number(r && r.step_id) === idx + 1);
+    if (!rec) return step;
+    const sctx = (rec.selector_context && typeof rec.selector_context === "object") ? rec.selector_context : {};
+    const fallback = (rec.fallback && typeof rec.fallback === "object") ? rec.fallback : {};
+    const textVariants = Array.isArray(fallback.text_variants)
+      ? fallback.text_variants.filter(t => typeof t === "string" && t.trim())
+      : [];
+    const recCandidates = [sctx.primary, ...(Array.isArray(sctx.alternatives) ? sctx.alternatives : [])].filter(Boolean);
+    const existingCandidates = Array.isArray(step.candidates) ? step.candidates : [];
+    const mergedCandidates = Array.from(new Set([...existingCandidates, ...recCandidates]));
+    return {
+      ...step,
+      candidates: mergedCandidates,
+      fallback_selectors: [
+        ...(Array.isArray(step.fallback_selectors) ? step.fallback_selectors : []),
+        ...textVariants.map(t => `text=${JSON.stringify(t.trim())}`),
+      ],
+      anchors: Array.isArray(rec.anchors) ? rec.anchors.filter(a => a && typeof a.text === "string" && a.text.trim()) : [],
+      _intent: rec.intent || "",
+      _visual_ref: rec.visual_ref || "",
+    };
+  });
 }
 
 // ─── Step executor ────────────────────────────────────────────────────────────
@@ -85,7 +115,13 @@ async function executeStep(page, step, inputs) {
     return;
   }
   if (type === "focus") {
-    if (sel) await page.locator(sel).first().focus({ timeout: 10000 }).catch(() => {});
+    if (sel) {
+      try {
+        await page.locator(sel).first().click({ timeout: 5000 });
+      } catch (_) {
+        await page.locator(sel).first().focus({ timeout: 10000 }).catch(() => {});
+      }
+    }
     return;
   }
   if (type === "check") {
@@ -175,6 +211,7 @@ async function runPlan(page, steps, inputs) {
         await waitForUrlState(page, step.url_state.after);
       }
     } catch (err) {
+      const sel = interpolate(step.selector || step.css_selector || (step.target && step.target.css) || "", inputs);
       // Layer 1: step-embedded alternative selectors
       const candidates = Array.from(new Set([
         ...(Array.isArray(step.fallback_selectors) ? step.fallback_selectors : []),
@@ -211,6 +248,24 @@ async function runPlan(page, steps, inputs) {
           }
         }
       }
+      // Layer 4: modal-scoped click — dialogs intercept pointer events on the backdrop button
+      if (!recovered && step.type === "click" && sel) {
+        const modalContainers = ['[role="dialog"]', '[role="alertdialog"]', '[aria-modal="true"]', ".modal"];
+        for (const container of modalContainers) {
+          const scoped = `${container} ${sel}`;
+          if (await tryLocator(page, scoped, 2000)) {
+            try {
+              await executeStep(page, { ...step, selector: scoped }, inputs);
+              if (step.url_state && step.url_state.after && step.url_state.after.url_pattern) {
+                await waitForUrlState(page, step.url_state.after);
+              }
+              recovered = true;
+              break;
+            } catch (_) {}
+          }
+          if (recovered) break;
+        }
+      }
       if (!recovered) throw new Error(`Step ${i} (${step.type}) failed: ${err.message}`);
     }
   }
@@ -218,42 +273,74 @@ async function runPlan(page, steps, inputs) {
 
 // ─── Session management ───────────────────────────────────────────────────────
 
-async function isAuthenticated(page) {
-  const url = page.url();
+function isAuthenticated(page) {
   try {
-    if (new URL(url).hostname !== new URL(PROTECTED_URL).hostname) return false;
+    const u = new URL(page.url());
+    // Authenticated = on Render dashboard, NOT on the login page
+    return u.hostname === new URL(PROTECTED_URL).hostname && !u.pathname.startsWith("/login");
   } catch (_) { return false; }
-  if (MARKER_TEXT) {
-    const text = await page.textContent("body").catch(() => "");
-    if (!text.includes(MARKER_TEXT)) return false;
-  }
-  return true;
 }
 
 async function getAuthContext(headless) {
-  const browser = await chromium.launch({ headless: headless !== false });
-  const opts = {};
+  // ── Phase 1: Try stored session ─────────────────────────────────────────
   if (fs.existsSync(AUTH_JSON)) {
-    try { opts.storageState = JSON.parse(fs.readFileSync(AUTH_JSON, "utf8")); } catch (_) {}
+    let stored;
+    try { stored = JSON.parse(fs.readFileSync(AUTH_JSON, "utf8")); } catch (_) {}
+    if (stored) {
+      const browser = await chromium.launch({ headless: headless !== false });
+      const context = await browser.newContext({ storageState: stored });
+      const page    = await context.newPage();
+      await page.goto(PROTECTED_URL, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
+      await page.waitForTimeout(1500);
+      if (isAuthenticated(page)) {
+        await page.close();
+        console.error("[auth] Session restored from auth.json");
+        return { browser, context };
+      }
+      await browser.close();
+      console.error("[auth] Stored session expired — starting manual login");
+    }
+  } else {
+    console.error("[auth] No auth.json — starting manual login");
   }
-  const context = await browser.newContext(opts);
+
+  // ── Phase 2: Open visible browser, wait for user to log in ──────────────
+  console.error("[auth] Opening login browser — waiting for user to authenticate...");
+  const loginBrowser = await chromium.launch({ headless: false });
+  const loginCtx     = await loginBrowser.newContext();
+  const loginPage    = await loginCtx.newPage();
+  await loginPage.goto(CONFIG.target_url, { waitUntil: "domcontentloaded", timeout: 30000 });
+
+  try {
+    await loginPage.waitForURL(
+      url => url.href.startsWith(PROTECTED_URL) && !url.href.includes("/login"),
+      { timeout: 300000 }
+    );
+  } catch (_) {
+    await loginBrowser.close();
+    throw new Error("Authentication timed out after 5 minutes. Please try again.");
+  }
+
+  // ── Phase 3: Save session ────────────────────────────────────────────────
+  const state = await loginCtx.storageState();
+  fs.mkdirSync(path.dirname(AUTH_JSON), { recursive: true });
+  fs.writeFileSync(AUTH_JSON, JSON.stringify(state, null, 2));
+  console.error("[auth] Session saved to auth.json — closing login browser");
+  await loginBrowser.close();
+
+  // ── Phase 4: Relaunch with authenticated session ─────────────────────────
+  console.error("[auth] Relaunching authenticated browser...");
+  const browser = await chromium.launch({ headless: headless !== false });
+  const context = await browser.newContext({ storageState: state });
   const page    = await context.newPage();
-
   await page.goto(PROTECTED_URL, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
-  await page.waitForTimeout(600);
-
-  if (!(await isAuthenticated(page))) {
-    if (!fs.existsSync(LOGIN_DIR))
-      throw new Error("Session expired. Ask Claude to call bootstrap_auth first.");
-    await runSkill(page, LOGIN_DIR, {});
-    const state = await context.storageState();
-    fs.mkdirSync(path.dirname(AUTH_JSON), { recursive: true });
-    fs.writeFileSync(AUTH_JSON, JSON.stringify(state, null, 2));
-    await page.goto(PROTECTED_URL, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
-    if (!(await isAuthenticated(page))) throw new Error("Auth failed. Call bootstrap_auth again.");
+  await page.waitForTimeout(1500);
+  if (!isAuthenticated(page)) {
+    await browser.close();
+    throw new Error("Authenticated navigation failed after login — unexpected error.");
   }
-
   await page.close();
+  console.error("[auth] Authenticated context ready");
   return { browser, context };
 }
 
@@ -267,24 +354,19 @@ const server = new Server(
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   const tools = [
     {
-      name: "bootstrap_auth",
-      description: `Set up your ${CONFIG.name} session. Opens a browser — log in, then close the window. Run once before using any skill.`,
-      inputSchema: { type: "object", properties: {}, required: [] },
-    },
-    {
       name: "list_skills",
-      description: "List all available skills with metadata",
+      description: "List available Render automation skills. Call this first to discover what actions are available, then use read_skill_files to get the execution steps for the matched skill.",
       inputSchema: { type: "object", properties: {}, required: [] },
     },
     {
       name: "read_skill_files",
-      description: "Read execution.json and recovery.json for a skill. Returns steps and recovery info for planning.",
-      inputSchema: { type: "object", properties: { slug: { type: "string", description: "Skill slug (use underscores or hyphens)" } }, required: ["slug"] },
+      description: "Get the full execution plan for a skill (steps + recovery data). Call this after list_skills to get steps, then pass those steps directly to execute_plan.",
+      inputSchema: { type: "object", properties: { slug: { type: "string", description: "Skill slug from list_skills" } }, required: ["slug"] },
     },
     {
       name: "execute_plan",
-      description: "Execute a merged multi-skill plan via Playwright. Accepts steps array (merged from multiple execution.json files). Runs visible browser.",
-      inputSchema: { type: "object", properties: { steps: { type: "array", description: "Merged array of execution steps from one or more skills" }, inputs: { type: "object", description: "Input values to substitute into step placeholders" } }, required: ["steps"] },
+      description: "Runs a Render workflow in a real browser. IMPORTANT: (1) Authentication is 100% automatic — never ask the user about login or sessions. (2) Call this immediately once you have the required inputs — do not ask for extra confirmations. (3) If the session is expired, a login browser opens automatically; the workflow resumes after the user logs in.",
+      inputSchema: { type: "object", properties: { steps: { type: "array", description: "Steps array from read_skill_files" }, inputs: { type: "object", description: "Input values e.g. { database_name: 'conxa-db' }" } }, required: ["steps"] },
     },
   ];
 
@@ -312,28 +394,20 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
-  if (name === "bootstrap_auth") {
-    const browser = await chromium.launch({ headless: false });
-    const context = await browser.newContext();
-    const page    = await context.newPage();
-    await page.goto(CONFIG.target_url, { waitUntil: "domcontentloaded", timeout: 30000 });
-    // Wait until user navigates to the protected area (up to 5 min)
-    try {
-      const protectedHostPath = new URL(PROTECTED_URL).pathname.replace(/\/$/, "");
-      await page.waitForURL(u => u.pathname.startsWith(protectedHostPath) || u.href.includes(PROTECTED_URL), { timeout: 300000 });
-    } catch (_) {}
-    const state = await context.storageState();
-    fs.mkdirSync(path.dirname(AUTH_JSON), { recursive: true });
-    fs.writeFileSync(AUTH_JSON, JSON.stringify(state, null, 2));
-    await browser.close();
-    return { content: [{ type: "text", text: `Session saved. You can now use ${CONFIG.name} skills.` }] };
-  }
-
   // ── list_skills ───────────────────────────────────────────────────────────
   if (name === "list_skills") {
     const skills = CONFIG.skills || [];
     console.error(`[list_skills] Returning ${skills.length} skills: ${skills.map(s => s.slug).join(", ")}`);
-    return { content: [{ type: "text", text: JSON.stringify(skills, null, 2) }] };
+    const instructions = [
+      "RUNTIME RULES — follow these for every workflow:",
+      "1. Auth is automatic. Never ask the user about login, sessions, or authentication.",
+      "2. Once you have the required inputs, call execute_plan immediately. No extra confirmations.",
+      "3. Flow: read_skill_files(slug) → collect missing inputs → execute_plan(steps, inputs).",
+      "",
+      "SKILLS:",
+      JSON.stringify(skills, null, 2),
+    ].join("\n");
+    return { content: [{ type: "text", text: instructions }] };
   }
 
   // ── read_skill_files ─────────────────────────────────────────────────────
@@ -352,6 +426,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const iPath    = path.join(skillDir, "input.json");
     const inputSchema = fs.existsSync(iPath) ? JSON.parse(fs.readFileSync(iPath, "utf8")) : null;
     const requiredInputs = inputSchema && inputSchema.required ? inputSchema.required : [];
+    const rawExecution = fs.existsSync(execPath) ? JSON.parse(fs.readFileSync(execPath, "utf8")) : null;
+    const rawRecovery  = fs.existsSync(recPath)  ? JSON.parse(fs.readFileSync(recPath,  "utf8")) : null;
+    const rawSteps = Array.isArray(rawExecution) ? rawExecution
+                   : (rawExecution && Array.isArray(rawExecution.steps)) ? rawExecution.steps : [];
+    const enrichedSteps = enrichStepsWithRecovery(rawSteps, rawRecovery);
     const result = {
       slug: skill.slug,
       skill_md:       fs.existsSync(mdPath)   ? fs.readFileSync(mdPath, "utf8") : null,
@@ -359,8 +438,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       instruction:    requiredInputs.length > 0
         ? `STOP — ask the user to provide these inputs before calling execute_plan: ${requiredInputs.join(", ")}`
         : "No inputs required. You may call execute_plan directly.",
-      execution: fs.existsSync(execPath) ? JSON.parse(fs.readFileSync(execPath, "utf8")) : null,
-      recovery:  fs.existsSync(recPath)  ? JSON.parse(fs.readFileSync(recPath,  "utf8")) : null,
+      execution: enrichedSteps,
+      recovery:  rawRecovery,
     };
     console.error(`[read_skill_files] Found ${skill.slug}: ${result.execution ? result.execution.length + " steps" : "no execution.json"}`);
     return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };

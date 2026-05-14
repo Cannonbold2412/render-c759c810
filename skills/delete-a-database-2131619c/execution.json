@@ -42,7 +42,12 @@
   },
   {
     "type": "click",
-    "selector": "text=\"{{database_name}}\"",
+    "selector": "a:has-text(\"{{database_name}}\")",
+    "candidates": [
+      "a:has-text(\"{{database_name}}\")",
+      "text=\"{{database_name}}\"",
+      "[data-resourcetype] a:has-text(\"{{database_name}}\")"
+    ],
     "url_state": {
       "before": {
         "url_pattern": "^https://dashboard\\.render\\.com/$"

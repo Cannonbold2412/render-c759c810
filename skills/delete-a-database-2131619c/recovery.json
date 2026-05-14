@@ -9,11 +9,11 @@
       },
       "anchors": [
         {
-          "text": "search bar",
+          "text": "Search",
           "priority": 2
         },
         {
-          "text": "ungrouped services",
+          "text": "New",
           "priority": 1
         }
       ],
@@ -23,7 +23,13 @@
       },
       "selector_context": {
         "primary": "input[type=\"text\"]",
-        "alternatives": []
+        "alternatives": [
+          "input[placeholder*=\"Search\"]",
+          "input[aria-label*=\"search\" i]",
+          "input[data-testid*=\"search\"]",
+          "header input",
+          "nav input"
+        ]
       },
       "visual_ref": "visuals/Image_3.jpg"
     },
@@ -36,19 +42,11 @@
       },
       "anchors": [
         {
-          "text": "search bar",
+          "text": "Search",
           "priority": 2
         },
         {
-          "text": "ungrouped services",
-          "priority": 1
-        },
-        {
-          "text": "suspended",
-          "priority": 1
-        },
-        {
-          "text": "active",
+          "text": "New",
           "priority": 1
         }
       ],
@@ -58,7 +56,13 @@
       },
       "selector_context": {
         "primary": "input[type=\"text\"]",
-        "alternatives": []
+        "alternatives": [
+          "input[placeholder*=\"Search\"]",
+          "input[aria-label*=\"search\" i]",
+          "input[data-testid*=\"search\"]",
+          "header input",
+          "nav input"
+        ]
       },
       "visual_ref": "visuals/Image_4.jpg"
     },
@@ -82,8 +86,12 @@
         "role": "link"
       },
       "selector_context": {
-        "primary": "text=\"{{database_name}}\"",
-        "alternatives": []
+        "primary": "a:has-text(\"{{database_name}}\")",
+        "alternatives": [
+          "text=\"{{database_name}}\"",
+          "[data-resourcetype] a:has-text(\"{{database_name}}\")",
+          "a[href*=\"/d/\"]"
+        ]
       },
       "visual_ref": "visuals/Image_5.jpg"
     },
@@ -160,8 +168,11 @@
       "selector_context": {
         "primary": "input[name=\"sudoCommand\"]",
         "alternatives": [
-          "input[type=\"text\"]",
-          "#sudo-command"
+          "input[type=\"text\"][name*=\"sudo\"]",
+          "input[placeholder*=\"sudo\"]",
+          "#sudo-command",
+          "[role=\"dialog\"] input[type=\"text\"]",
+          "[aria-modal=\"true\"] input[type=\"text\"]"
         ]
       },
       "visual_ref": "visuals/Image_8.jpg"
@@ -175,29 +186,26 @@
       },
       "anchors": [
         {
-          "text": "sudo delete database conxa-db",
+          "text": "Type sudo delete database",
           "priority": 2
         },
         {
-          "text": "delete database",
+          "text": "Confirm deletion",
           "priority": 1
-        },
-        {
-          "text": "sudoCommand",
-          "priority": 2
         }
       ],
       "fallback": {
-        "text_variants": [
-          "sudoCommand"
-        ],
+        "text_variants": [],
         "role": "textbox"
       },
       "selector_context": {
         "primary": "input[name=\"sudoCommand\"]",
         "alternatives": [
-          "input[type=\"text\"]",
-          "#sudo-command"
+          "input[type=\"text\"][name*=\"sudo\"]",
+          "input[placeholder*=\"sudo\"]",
+          "#sudo-command",
+          "[role=\"dialog\"] input[type=\"text\"]",
+          "[aria-modal=\"true\"] input[type=\"text\"]"
         ]
       },
       "visual_ref": "visuals/Image_9.jpg"

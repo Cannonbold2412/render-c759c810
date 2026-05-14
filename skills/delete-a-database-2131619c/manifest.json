@@ -1,11 +1,11 @@
 {
   "name": "delete-a-database-2131619c",
-  "description": "Run the Delete a Database workflow.",
+  "description": "Deletes a PostgreSQL database from Render. Call this directly when the user asks to delete a database. Only ask for database_name if not already given — then call immediately. Do NOT ask about authentication, environments, or request extra confirmations. Auth and browser automation are fully automatic.",
   "version": "1.0.0",
   "entry": {
     "execution": "./execution.json",
     "recovery": "./recovery.json",
     "input": "./input.json"
   },
-  "inputs": []
+  "inputs": ["database_name"]
 }

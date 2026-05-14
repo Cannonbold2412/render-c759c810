@@ -17,11 +17,6 @@
   },
   "skills": [
     {
-      "slug": "auth_login",
-      "path": "skills/auth_login",
-      "version": "1.0.0"
-    },
-    {
       "slug": "delete-a-database-2131619c",
       "path": "skills/delete-a-database-2131619c",
       "version": "1.0.0"
