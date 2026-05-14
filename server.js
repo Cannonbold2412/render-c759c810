@@ -355,38 +355,37 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   const tools = [
     {
       name: "list_skills",
-      description: "List available Render automation skills. Call this first to discover what actions are available, then use read_skill_files to get the execution steps for the matched skill.",
+      description: "List all available Render skills with their required inputs. Call this once to plan, then call execute_plan immediately. Never call read_skill_files in normal flow.",
       inputSchema: { type: "object", properties: {}, required: [] },
     },
     {
-      name: "read_skill_files",
-      description: "Get the full execution plan for a skill (steps + recovery data). Call this after list_skills to get steps, then pass those steps directly to execute_plan.",
-      inputSchema: { type: "object", properties: { slug: { type: "string", description: "Skill slug from list_skills" } }, required: ["slug"] },
+      name: "execute_plan",
+      description: "Run one or more Render skills in sequence in a single browser session. Auth is 100% automatic — never ask about login. Call immediately once inputs are ready. Format: { skills: [{ slug, inputs }] }. Single: { skills: [{ slug: 'delete-a-database-2131619c', inputs: { database_name: 'conxa-db' } }] }. Multi: { skills: [{ slug: 'deploy-service', inputs: {...} }, { slug: 'delete-a-database-2131619c', inputs: {...} }] }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          skills: {
+            type: "array",
+            description: "Ordered list of skills to run",
+            items: {
+              type: "object",
+              properties: {
+                slug: { type: "string", description: "Skill slug from list_skills" },
+                inputs: { type: "object", description: "Input values for this skill" },
+              },
+              required: ["slug"],
+            },
+          },
+        },
+        required: ["skills"],
+      },
     },
     {
-      name: "execute_plan",
-      description: "Runs a Render workflow in a real browser. IMPORTANT: (1) Authentication is 100% automatic — never ask the user about login or sessions. (2) Call this immediately once you have the required inputs — do not ask for extra confirmations. (3) If the session is expired, a login browser opens automatically; the workflow resumes after the user logs in.",
-      inputSchema: { type: "object", properties: { steps: { type: "array", description: "Steps array from read_skill_files" }, inputs: { type: "object", description: "Input values e.g. { database_name: 'conxa-db' }" } }, required: ["steps"] },
+      name: "read_skill_files",
+      description: "DEBUG ONLY — inspect raw execution steps and recovery data for a skill. Do not use in normal workflows.",
+      inputSchema: { type: "object", properties: { slug: { type: "string" } }, required: ["slug"] },
     },
   ];
-
-  for (const skill of (CONFIG.skills || [])) {
-    let description = `Execute ${skill.slug} on ${CONFIG.target_url}`;
-    let inputSchema = { type: "object", properties: {}, required: [] };
-    const mPath = path.join(PLUGIN_DIR, skill.path, "manifest.json");
-    const iPath = path.join(PLUGIN_DIR, skill.path, "input.json");
-    if (fs.existsSync(mPath)) {
-      try { const m = JSON.parse(fs.readFileSync(mPath, "utf8")); description = m.description || m.intent || description; }
-      catch (_) {}
-    }
-    if (fs.existsSync(iPath)) {
-      try {
-        const loaded = JSON.parse(fs.readFileSync(iPath, "utf8"));
-        inputSchema = { type: "object", ...loaded };
-      } catch (_) {}
-    }
-    tools.push({ name: skill.slug.replace(/-/g, "_"), description, inputSchema });
-  }
   console.error(`[ListTools] Registering ${tools.length} tools: ${tools.map(t => t.name).join(", ")}`);
   return { tools };
 });
@@ -396,18 +395,33 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
   // ── list_skills ───────────────────────────────────────────────────────────
   if (name === "list_skills") {
-    const skills = CONFIG.skills || [];
-    console.error(`[list_skills] Returning ${skills.length} skills: ${skills.map(s => s.slug).join(", ")}`);
-    const instructions = [
-      "RUNTIME RULES — follow these for every workflow:",
-      "1. Auth is automatic. Never ask the user about login, sessions, or authentication.",
-      "2. Once you have the required inputs, call execute_plan immediately. No extra confirmations.",
-      "3. Flow: read_skill_files(slug) → collect missing inputs → execute_plan(steps, inputs).",
+    const skills = (CONFIG.skills || []).map(skill => {
+      const iPath = path.join(PLUGIN_DIR, skill.path, "input.json");
+      const mPath = path.join(PLUGIN_DIR, skill.path, "manifest.json");
+      let requiredInputs = [];
+      let inputProps = {};
+      let description = skill.slug;
+      if (fs.existsSync(iPath)) {
+        try {
+          const s = JSON.parse(fs.readFileSync(iPath, "utf8"));
+          requiredInputs = s.required || [];
+          inputProps = s.properties || {};
+        } catch (_) {}
+      }
+      if (fs.existsSync(mPath)) {
+        try { description = JSON.parse(fs.readFileSync(mPath, "utf8")).description || description; } catch (_) {}
+      }
+      return { slug: skill.slug, description, required_inputs: requiredInputs, inputs: inputProps };
+    });
+    console.error(`[list_skills] Returning ${skills.length} skills`);
+    const out = [
+      "RULES: auth automatic, no confirmations, no read_skill_files.",
+      "FLOW: list_skills → ask for any missing inputs → execute_plan({ skills: [{ slug, inputs }] })",
       "",
       "SKILLS:",
       JSON.stringify(skills, null, 2),
     ].join("\n");
-    return { content: [{ type: "text", text: instructions }] };
+    return { content: [{ type: "text", text: out }] };
   }
 
   // ── read_skill_files ─────────────────────────────────────────────────────
@@ -447,68 +461,59 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
   // ── execute_plan ─────────────────────────────────────────────────────────
   if (name === "execute_plan") {
-    const steps  = (args && Array.isArray(args.steps))  ? args.steps  : [];
-    const inputs = (args && typeof args.inputs === "object" && args.inputs) ? args.inputs : {};
-    console.error(`[execute_plan] Starting with ${steps.length} steps, inputs: ${JSON.stringify(inputs)}`);
-    if (steps.length === 0) return { content: [{ type: "text", text: "execute_plan: no steps provided." }] };
+    const skillRuns = (args && Array.isArray(args.skills)) ? args.skills : [];
+    if (skillRuns.length === 0)
+      return { content: [{ type: "text", text: "execute_plan: provide { skills: [{ slug, inputs }] }" }] };
+
+    // Resolve each slug to enriched steps
+    const resolved = [];
+    for (const run of skillRuns) {
+      const slug = String(run.slug || "");
+      const inputs = (run.inputs && typeof run.inputs === "object") ? run.inputs : {};
+      const skill = (CONFIG.skills || []).find(s =>
+        s.slug === slug || s.slug === slug.replace(/_/g, "-") || s.slug === slug.replace(/-/g, "_")
+      );
+      if (!skill) return { content: [{ type: "text", text: `Skill not found: ${slug}. Call list_skills to see available skills.` }] };
+      const skillDir = path.join(PLUGIN_DIR, skill.path);
+      const rawExec  = fs.existsSync(path.join(skillDir, "execution.json"))
+        ? JSON.parse(fs.readFileSync(path.join(skillDir, "execution.json"), "utf8")) : null;
+      const rawRec   = fs.existsSync(path.join(skillDir, "recovery.json"))
+        ? JSON.parse(fs.readFileSync(path.join(skillDir, "recovery.json"), "utf8")) : null;
+      const rawSteps = Array.isArray(rawExec) ? rawExec
+        : (rawExec && Array.isArray(rawExec.steps)) ? rawExec.steps : [];
+      resolved.push({ steps: enrichStepsWithRecovery(rawSteps, rawRec), inputs, slug });
+    }
 
     let _browser, _context;
     try {
       ({ browser: _browser, context: _context } = await getAuthContext(false));
-      console.error(`[execute_plan] Auth context ready`);
     } catch (authErr) {
-      console.error(`[execute_plan] Auth failed: ${authErr}`);
       return { content: [{ type: "text", text: String(authErr) }] };
     }
 
     const page = await _context.newPage();
     try {
-      console.error(`[execute_plan] Running ${steps.length} steps...`);
-      await runPlan(page, steps, inputs);
+      for (const { steps, inputs, slug } of resolved) {
+        console.error(`[execute_plan] Running ${slug} (${steps.length} steps)...`);
+        await runPlan(page, steps, inputs);
+      }
       const state = await _context.storageState();
       fs.mkdirSync(path.dirname(AUTH_JSON), { recursive: true });
       fs.writeFileSync(AUTH_JSON, JSON.stringify(state, null, 2));
       const shot = await page.screenshot({ type: "png" }).catch(() => null);
       const url  = page.url();
       await _browser.close();
-      console.error(`[execute_plan] Success! URL: ${url}`);
-      const content = [{ type: "text", text: `Plan executed successfully. URL: ${url}` }];
+      console.error(`[execute_plan] Done. URL: ${url}`);
+      const content = [{ type: "text", text: `Done. URL: ${url}` }];
       if (shot) content.push({ type: "image", data: shot.toString("base64"), mimeType: "image/png" });
       return { content };
     } catch (err) {
-      console.error(`[execute_plan] Failed: ${err.message}`);
       await _browser.close().catch(() => {});
-      return { content: [{ type: "text", text: `Plan execution failed at: ${err.message}` }] };
+      return { content: [{ type: "text", text: `Execution failed: ${err.message}` }] };
     }
   }
 
-  const skillSlug = name.replace(/_/g, "-");
-  const skill = (CONFIG.skills || []).find(s => s.slug === skillSlug);
-  if (!skill) throw new Error(`Unknown tool: ${name}`);
-
-  let _browser, _context;
-  try {
-    ({ browser: _browser, context: _context } = await getAuthContext(false));
-  } catch (authErr) {
-    return { content: [{ type: "text", text: String(authErr) }] };
-  }
-
-  const page = await _context.newPage();
-  try {
-    await runSkill(page, path.join(PLUGIN_DIR, skill.path), args || {});
-    const state = await _context.storageState();
-    fs.mkdirSync(path.dirname(AUTH_JSON), { recursive: true });
-    fs.writeFileSync(AUTH_JSON, JSON.stringify(state, null, 2));
-    const shot = await page.screenshot({ type: "png" }).catch(() => null);
-    const url  = page.url();
-    await _browser.close();
-    const content = [{ type: "text", text: `${skill.slug} completed. URL: ${url}` }];
-    if (shot) content.push({ type: "image", data: shot.toString("base64"), mimeType: "image/png" });
-    return { content };
-  } catch (err) {
-    await _browser.close().catch(() => {});
-    return { content: [{ type: "text", text: `Skill failed: ${err}` }] };
-  }
+  return { content: [{ type: "text", text: `Unknown tool: ${name}` }] };
 });
 
 const _skillFlagIdx = process.argv.indexOf("--run-skill");
