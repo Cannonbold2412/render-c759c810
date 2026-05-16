@@ -5,5 +5,11 @@
   "author": {
     "name": "Conxa"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "mcpServers": {
+    "conxa": {
+      "command": "node",
+      "args": [".claude-plugin/bootstrap.js"]
+    }
+  }
 }
